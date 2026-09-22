@@ -540,9 +540,8 @@ const FREE_TYPE        = "free";
 /* =========================================================
  *  🔗 SHORTENER CONFIG  (👇 YAHAN APNA LINK DAALO)
  * ========================================================= */
-const SHORTENER_URL = "https://earnlinks.in/pXQhT;
-
-const PENDING_FLAG = 'bf_pending_unlock';
+const SHORTENER_URL = "https://earnlinks.in/pXQhT";
+const SHORTENER_WAIT_SECONDS = 15; // 👈 minimum wait time (kam/zyada kar sakte ho)
 
 let _toastTimer = null;
 
@@ -601,12 +600,12 @@ async function pushConfig(payload) {
 
 /* =========================================================
  *  KEY GENERATOR
- * ========================================================= */
-function generateKey() {
+ * ==================================================
+    function generateKey() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     const seg = n => Array.from({ length: n },
         () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    return `AMIT-${seg(4)}-${seg(4)}`;
+    return `FOX-${seg(4)}-${seg(4)}`;
 }
 
 /* =========================================================
@@ -702,21 +701,19 @@ const statusEl  = document.getElementById('status');
 
 progressEl.style.strokeDashoffset = 0;
 
-function startTimer() {
-    const iv = setInterval(() => {
-        seconds--;
-        timerEl.textContent = seconds;
-        const offset = CIRC * (1 - seconds / WAIT_SECONDS);
-        progressEl.style.strokeDashoffset = offset;
-        if (seconds <= 0) {
-            clearInterval(iv);
-            timerEl.textContent = '✓';
-            ringEl.classList.add('done');
-            unlockBtn.disabled = false;
-            setStatus('Ready — tap Unlock', '');
-        }
-    }, 1000);
-}
+const iv = setInterval(() => {
+    seconds--;
+    timerEl.textContent = seconds;
+    const offset = CIRC * (1 - seconds / WAIT_SECONDS);
+    progressEl.style.strokeDashoffset = offset;
+    if (seconds <= 0) {
+        clearInterval(iv);
+        timerEl.textContent = '✓';
+        ringEl.classList.add('done');
+        unlockBtn.disabled = false;
+        setStatus('Ready — tap Unlock', '');
+    }
+}, 1000);
 
 function setStatus(msg, cls) {
     statusEl.textContent = msg;
@@ -728,43 +725,71 @@ function unlockBtnReset() {
 }
 
 /* =========================================================
- *  🔓 SHORTENER FLOW  (SAME TAB)
- *  Click → Same tab me link khulta hai → Back aane par key generate
+ *  🔓 SHORTENER FLOW (POLLING METHOD - 100% RELIABLE)
  * ========================================================= */
+let shortenerOpened    = false;
+let shortenerStartTime = 0;
+let shortenerVerified  = false;
+let verifyInterval     = null;
 
-/* Button click — same tab me link kholo */
 unlockBtn.addEventListener('click', () => {
-    // Pending flag save karo
-    sessionStorage.setItem(PENDING_FLAG, 'true');
-    // Same tab me navigate karo
-    window.location.href = SHORTENER_URL;
-});
 
-/* Wapas aane par key generate karo */
-function handleReturnFromShortener() {
-    if (sessionStorage.getItem(PENDING_FLAG) === 'true') {
-        sessionStorage.removeItem(PENDING_FLAG);
+    /* STEP 1 — Pehli baar click: shortener kholo */
+    if (!shortenerVerified) {
+        if (!shortenerOpened) {
+            shortenerOpened = true;
+            shortenerStartTime = Date.now();
 
-        // UI set karo
-        document.querySelector('.timer-wrap').classList.add('hidden');
-        document.getElementById('infoCard').classList.add('hidden');
-        unlockBtn.disabled = true;
-        unlockBtn.innerHTML = '<span class="btn-icon icon-spin icon-retry"></span>Generating...';
-        setStatus('Welcome back! Generating your key...', '');
+            unlockBtn.disabled = true;
+            unlockBtn.innerHTML = '<span class="btn-icon icon-spin icon-retry"></span>Verifying...';
 
-        // Thoda delay taki UI render ho jaye
-        setTimeout(() => createKey(), 400);
-    } else {
-        // Normal page load — timer chalao
-        startTimer();
+            // Shortener naye tab me open karo
+            window.open(SHORTENER_URL, '_blank');
+
+            // Polling shuru karo — har second check karega
+            startVerificationPolling();
+        } else {
+            // User ne dobara click kiya jab verify pending hai — shortener dobara kholo
+            window.open(SHORTENER_URL, '_blank');
+            toast('Complete the shortener to unlock');
+        }
+        return;
     }
-}
 
-/* pageshow + load dono handle karo (bfcache ke liye) */
-window.addEventListener('pageshow', (e) => {
-    if (e.persisted) handleReturnFromShortener();
+    /* STEP 3 — Verified ho chuka: ab key generate karo */
+    unlockBtn.disabled = true;
+    unlockBtn.innerHTML = '<span class="btn-icon icon-spin icon-retry"></span>Working...';
+    createKey();
 });
-window.addEventListener('load', handleReturnFromShortener);
+
+function startVerificationPolling() {
+    if (verifyInterval) clearInterval(verifyInterval);
+
+    verifyInterval = setInterval(() => {
+        if (shortenerVerified) {
+            clearInterval(verifyInterval);
+            verifyInterval = null;
+            return;
+        }
+
+        const elapsed   = (Date.now() - shortenerStartTime) / 1000;
+        const remaining = Math.ceil(SHORTENER_WAIT_SECONDS - elapsed);
+
+        if (remaining > 0) {
+            setStatus(`⏳ Complete the shortener... verifying in ${remaining}s`, '');
+        } else {
+            // ✅ Verified!
+            shortenerVerified = true;
+            clearInterval(verifyInterval);
+            verifyInterval = null;
+
+            setStatus('✅ Verified! Now tap "Get Key" to reveal your key.', 'success');
+            unlockBtn.disabled = false;
+            unlockBtn.innerHTML = '<span class="btn-icon icon-lock"></span>Get Key';
+            toast('Verified! Tap Get Key');
+        }
+    }, 1000);
+}
 
 /* =========================================================
  *  COPY / OTHER EVENTS
